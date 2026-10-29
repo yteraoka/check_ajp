@@ -43,37 +43,37 @@ var SC_REQ_ATTR = map[string][]byte{
 }
 
 var METHOD = map[string]int{
-	"GET":              2,
-	"HEAD":             3,
-/*
-	Other methods are not supported yet.
+	"GET":  2,
+	"HEAD": 3,
+	/*
+	   Other methods are not supported yet.
 
-	"OPTIONS":          1,
-	"POST":             4,
-	"PUT":              5,
-	"DELETE":           6,
-	"TRACE":            7,
-	"PROPFIND":         8,
-	"PROPPATCH":        9,
-	"MKCOL":            10,
-	"COPY":             11,
-	"MOVE":             12,
-	"LOCK":             13,
-	"UNLOCK":           14,
-	"ACL":              15,
-	"REPORT":           16,
-	"VERSION-CONTROL":  17,
-	"CHECKIN":          18,
-	"CHECKOUT":         19,
-	"UNCHECKOUT":       20,
-	"SEARCH":           21,
-	"MKWORKSPACE":      22,
-	"UPDATE":           23,
-	"LABEL":            24,
-	"MERGE":            25,
-	"BASELINE_CONTROL": 26,
-	"MKACTIVITY":       27,
-*/
+	   "OPTIONS":          1,
+	   "POST":             4,
+	   "PUT":              5,
+	   "DELETE":           6,
+	   "TRACE":            7,
+	   "PROPFIND":         8,
+	   "PROPPATCH":        9,
+	   "MKCOL":            10,
+	   "COPY":             11,
+	   "MOVE":             12,
+	   "LOCK":             13,
+	   "UNLOCK":           14,
+	   "ACL":              15,
+	   "REPORT":           16,
+	   "VERSION-CONTROL":  17,
+	   "CHECKIN":          18,
+	   "CHECKOUT":         19,
+	   "UNCHECKOUT":       20,
+	   "SEARCH":           21,
+	   "MKWORKSPACE":      22,
+	   "UPDATE":           23,
+	   "LABEL":            24,
+	   "MERGE":            25,
+	   "BASELINE_CONTROL": 26,
+	   "MKACTIVITY":       27,
+	*/
 }
 
 const JK_AJP13_FORWARD_REQUEST = 0x02
