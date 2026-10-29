@@ -97,6 +97,27 @@ func sanitizeOutput(s string, multiline bool) string {
 	return b.String()
 }
 
+// trimIPv6Brackets removes the brackets of an IPv6 address given as [::1]
+// since net.JoinHostPort adds them. server_name is sent as given.
+func trimIPv6Brackets(host string) string {
+	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		return host[1 : len(host)-1]
+	}
+	return host
+}
+
+// localIPAddress returns the IP address of the local side of the connection
+// without the port (and without the zone of an IPv6 link-local address).
+func localIPAddress(addr net.Addr) string {
+	if tcpAddr, ok := addr.(*net.TCPAddr); ok {
+		return tcpAddr.IP.String()
+	}
+	if host, _, err := net.SplitHostPort(addr.String()); err == nil {
+		return host
+	}
+	return addr.String()
+}
+
 // secondsToDuration converts seconds given as a float into a time.Duration
 // without dropping the fractional part (time.Duration(0.5)*time.Second is 0).
 func secondsToDuration(sec float64) time.Duration {
@@ -183,7 +204,7 @@ func main() {
 	var dial net.Dialer
 	dial.Timeout = secondsToDuration(opts.Timeout)
 
-	remote := opts.Ipaddr + ":" + strconv.Itoa(opts.Port)
+	remote := net.JoinHostPort(trimIPv6Brackets(opts.Ipaddr), strconv.Itoa(opts.Port))
 
 	t1 := time.Now()
 
@@ -203,8 +224,7 @@ func main() {
 		os.Exit(nagiosStatusCode)
 	}
 
-	localaddr := conn.LocalAddr().String()
-	localaddr = localaddr[0:strings.Index(localaddr, ":")]
+	localaddr := localIPAddress(conn.LocalAddr())
 
 	if opts.RemoteAddr == "" {
 		req.RemoteAddr = localaddr
