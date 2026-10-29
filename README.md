@@ -50,6 +50,17 @@ AJP OK: 200 - 137 bytes in 0.012 second response time |time=0.012235s;;;0.000000
 }
 ```
 
+### attributes
+
+Request attributes are given as `-a name=value` and can be repeated.
+`req_attribute` takes both a name and a value (`-a req_attribute=name=value`), and `ssl_key_size` takes an integer.
+
+```
+./check_ajp -I server -a route=node1 -a req_attribute=foo=bar -a ssl_key_size=256
+```
+
+Tomcat rejects a `req_attribute` with 403 unless its name matches `allowedRequestAttributesPattern` of the AJP connector.
+
 ## Limitations
 
 Current version supported `GET` and `HEAD` method only.
