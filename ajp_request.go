@@ -284,7 +284,10 @@ func (r *AJP13ForwardRequest) encode() ([]byte, error) {
 	if len(data.buf) > packetSize {
 		return nil, fmt.Errorf("request packet is %d bytes, which exceeds the AJP packet size %d bytes (--packet-size)", len(data.buf), packetSize)
 	}
-	// the data length always fits in uint16 since packetSize is at most 65536
-	binary.BigEndian.PutUint16(data.buf[2:4], uint16(len(data.buf)-4))
+	n := len(data.buf) - 4
+	if n < 0 || n > 0xFFFF {
+		return nil, fmt.Errorf("request data is %d bytes, which does not fit in the length field", n)
+	}
+	binary.BigEndian.PutUint16(data.buf[2:4], uint16(n))
 	return data.buf, nil
 }

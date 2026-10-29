@@ -119,3 +119,15 @@ func TestEncodeInvalidValue(t *testing.T) {
 		t.Errorf("expected error for port 70000")
 	}
 }
+
+func TestEncodeLengthFieldOverflow(t *testing.T) {
+	// PacketSize is checked by main, but encode must not wrap the length
+	// field even if a larger PacketSize is given
+	req := AJP13ForwardRequest{PrefixCode: JK_AJP13_FORWARD_REQUEST, Method: "GET", PacketSize: 1 << 20}
+	for i := 0; i < 2; i++ {
+		req.Headers = append(req.Headers, &RequestHeader{Name: "x-long", Value: strings.Repeat("a", 40000)})
+	}
+	if _, err := req.encode(); err == nil {
+		t.Errorf("expected error for data longer than 0xFFFF bytes")
+	}
+}
