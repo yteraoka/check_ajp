@@ -55,7 +55,12 @@ type AJP13Response struct {
 	StatusCode    int
 	StatusMessage string
 	Headers       []*ResponseHeader
-	Body          []byte
+	Body          []byte // at most maxBodySize bytes of the body
+	BodySize      int    // the whole body size including the discarded part
+}
+
+func (r *AJP13Response) bodyTruncated() bool {
+	return r.BodySize > len(r.Body)
 }
 
 func (r *AJP13Response) header(name string) []string {
@@ -149,7 +154,9 @@ func readPacket(r io.Reader) ([]byte, error) {
 	return payload, nil
 }
 
-func readResponse(conn io.Reader) (AJP13Response, error) {
+// readResponse reads the whole response. Only the first maxBodySize bytes of
+// the body are kept and the rest is discarded.
+func readResponse(conn io.Reader, maxBodySize int) (AJP13Response, error) {
 	var res AJP13Response
 	br := bufio.NewReader(conn)
 	for {
@@ -175,7 +182,13 @@ func readResponse(conn io.Reader) (AJP13Response, error) {
 				return res, err
 			}
 			// remaining bytes (e.g. the trailing 0x00) are ignored
-			res.Body = append(res.Body, chunk...)
+			res.BodySize += len(chunk)
+			if room := maxBodySize - len(res.Body); room > 0 {
+				if len(chunk) > room {
+					chunk = chunk[:room]
+				}
+				res.Body = append(res.Body, chunk...)
+			}
 		case AJP13_SEND_HEADERS:
 			err = readResponseHeaders(r, &res)
 			if err != nil {

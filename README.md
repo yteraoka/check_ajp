@@ -9,29 +9,31 @@ Usage:
   check_ajp [OPTIONS]
 
 Application Options:
-  -A, --useragent=   User-Agent header (default: check_ajp (x.y.z))
-  -a, --attr=        Attributes (auth, jvmRoute,...)
-  -c, --crit=        Critical time in second (default: 10.0)
-  -e, --expect=      Expected status codes (csv)
-  -H, --vhost=       Host header value
-  -I, --ipaddr=      IP address or Server hostname (default: 127.0.0.1)
-  -k, --header=      Additional headers
-  -m, --method=      HTTP method (default: GET)
-  -P, --protocol=    HTTP protocol (default: HTTP/1.0)
-  -p, --port=        TCP Port (default: 8009)
-  -s, --ssl          isSSL flag
-  -t, --timeout=     Connect timeout in second (default: 1.0)
-  -u, --uri=         URI (default: /)
-  -v, --verbose      verbose output
-  -w, --warn=        Warning time in second (default: 5.0)
-  -V, --version      Show version
-      --json-key=    JSON key
-      --json-value=  Expected json value
-      --remote-addr= RemoteAddr header value
-      --remote-host= RemoteHost header value
+  -A, --useragent=     User-Agent header (default: check_ajp (x.y.z))
+  -a, --attr=          Attributes (auth, jvmRoute,...)
+  -c, --crit=          Critical time in second (default: 10.0)
+  -e, --expect=        Expected status codes (csv)
+  -H, --vhost=         Host header value
+  -I, --ipaddr=        IP address or Server hostname (default: 127.0.0.1)
+  -k, --header=        Additional headers
+  -m, --method=        HTTP method (default: GET)
+  -P, --protocol=      HTTP protocol (default: HTTP/1.0)
+  -p, --port=          TCP Port (default: 8009)
+  -s, --ssl            isSSL flag
+  -t, --timeout=       Connect timeout in second (default: 1.0)
+  -u, --uri=           URI (default: /)
+  -v, --verbose        verbose output
+  -w, --warn=          Warning time in second (default: 5.0)
+  -V, --version        Show version
+      --json-key=      JSON key
+      --json-value=    Expected json value
+      --remote-addr=   RemoteAddr header value
+      --remote-host=   RemoteHost header value
+      --max-body-size= Maximum response body size in bytes to keep (the rest is
+                       discarded) (default: 1048576)
 
 Help Options:
-  -h, --help         Show this help message
+  -h, --help           Show this help message
 ```
 
 ### example
