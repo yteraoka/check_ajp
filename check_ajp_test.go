@@ -42,3 +42,42 @@ func TestSecondsToDuration(t *testing.T) {
 		}
 	}
 }
+
+func TestParseHeaderOption(t *testing.T) {
+	tests := map[string]RequestHeader{
+		"X-Test: abc":   {Name: "X-Test", Value: "abc"},
+		"X-Test:abc":    {Name: "X-Test", Value: "abc"},
+		"X-Time: 10:20": {Name: "X-Time", Value: "10:20"},
+		"X-Empty:":      {Name: "X-Empty", Value: ""},
+	}
+	for in, want := range tests {
+		got, err := parseHeaderOption(in)
+		if err != nil {
+			t.Errorf("parseHeaderOption(%q): unexpected error: %v", in, err)
+			continue
+		}
+		if *got != want {
+			t.Errorf("parseHeaderOption(%q) = %+v, want %+v", in, *got, want)
+		}
+	}
+	for _, in := range []string{"X-Test", "", ": abc", " :abc"} {
+		if _, err := parseHeaderOption(in); err == nil {
+			t.Errorf("parseHeaderOption(%q): expected error", in)
+		}
+	}
+}
+
+func TestParseAttributeOption(t *testing.T) {
+	got, err := parseAttributeOption("route=node1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Value != "node1" {
+		t.Errorf("value = %q", got.Value)
+	}
+	for _, in := range []string{"route", "", "unknown=x", "req_attribute=foo"} {
+		if _, err := parseAttributeOption(in); err == nil {
+			t.Errorf("parseAttributeOption(%q): expected error", in)
+		}
+	}
+}

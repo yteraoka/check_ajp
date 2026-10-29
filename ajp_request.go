@@ -174,11 +174,6 @@ func newAJP13ForwardRequest(o Options) AJP13ForwardRequest {
 	return r
 }
 
-func (r *AJP13ForwardRequest) appendHeader(header string) {
-	hdr := strings.SplitN(header, ": ", 2)
-	r.Headers = append(r.Headers, &RequestHeader{Name: strings.ToLower(hdr[0]), Value: hdr[1]})
-}
-
 // requestEncoder keeps the first error returned by struc.Pack so that the
 // caller only has to check it once after encoding the whole packet.
 type requestEncoder struct {

@@ -53,19 +53,20 @@ type Options struct {
 	RemoteHost string   `long:"remote-host"          description:"RemoteHost header value"`
 }
 
-func parseHeaderOption(s string) *RequestHeader {
+func parseHeaderOption(s string) (*RequestHeader, error) {
 	parts := strings.SplitN(s, ":", 2)
-	return &RequestHeader{Name: strings.Trim(parts[0], " "), Value: strings.Trim(parts[1], " ")}
+	if len(parts) != 2 || strings.Trim(parts[0], " ") == "" {
+		return nil, fmt.Errorf("header must be given as name:value: %s", s)
+	}
+	return &RequestHeader{Name: strings.Trim(parts[0], " "), Value: strings.Trim(parts[1], " ")}, nil
 }
 
-func parseAttributeOption(s string) *Attribute {
+func parseAttributeOption(s string) (*Attribute, error) {
 	parts := strings.SplitN(s, "=", 2)
-	attr, err := newAttribute(parts[0], parts[1])
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(NagiosUnknown)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("attribute must be given as name=value: %s", s)
 	}
-	return attr
+	return newAttribute(parts[0], parts[1])
 }
 
 // sanitizeOutput makes text received from the server safe to print as plugin
@@ -139,11 +140,23 @@ func main() {
 	req := newAJP13ForwardRequest(opts)
 
 	for _, header_string := range opts.Headers {
-		req.Headers = append(req.Headers, parseHeaderOption(header_string))
+		hdr, err := parseHeaderOption(header_string)
+		if err != nil {
+			nagiosStatusCode = NagiosUnknown
+			fmt.Printf("AJP %s - %s\n", NagiosStatus[nagiosStatusCode], err)
+			os.Exit(nagiosStatusCode)
+		}
+		req.Headers = append(req.Headers, hdr)
 	}
 
 	for _, attribute_string := range opts.Attributes {
-		req.Attributes = append(req.Attributes, parseAttributeOption(attribute_string))
+		attr, err := parseAttributeOption(attribute_string)
+		if err != nil {
+			nagiosStatusCode = NagiosUnknown
+			fmt.Printf("AJP %s - %s\n", NagiosStatus[nagiosStatusCode], err)
+			os.Exit(nagiosStatusCode)
+		}
+		req.Attributes = append(req.Attributes, attr)
 	}
 
 	if err = req.validate(); err != nil {
