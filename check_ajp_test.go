@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net"
 	"testing"
 	"time"
 )
@@ -78,6 +79,43 @@ func TestParseAttributeOption(t *testing.T) {
 	for _, in := range []string{"route", "", "unknown=x", "req_attribute=foo"} {
 		if _, err := parseAttributeOption(in); err == nil {
 			t.Errorf("parseAttributeOption(%q): expected error", in)
+		}
+	}
+}
+
+func TestTrimIPv6Brackets(t *testing.T) {
+	tests := map[string]string{
+		"127.0.0.1":      "127.0.0.1",
+		"example.com":    "example.com",
+		"::1":            "::1",
+		"[::1]":          "::1",
+		"[fe80::1%eth0]": "fe80::1%eth0",
+	}
+	for in, want := range tests {
+		if got := trimIPv6Brackets(in); got != want {
+			t.Errorf("trimIPv6Brackets(%q) = %q, want %q", in, got, want)
+		}
+	}
+	for in, want := range map[string]string{"::1": "[::1]:8009", "[::1]": "[::1]:8009", "127.0.0.1": "127.0.0.1:8009"} {
+		if got := net.JoinHostPort(trimIPv6Brackets(in), "8009"); got != want {
+			t.Errorf("address for %q = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestLocalIPAddress(t *testing.T) {
+	tests := []struct {
+		addr net.Addr
+		want string
+	}{
+		{&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, "127.0.0.1"},
+		{&net.TCPAddr{IP: net.ParseIP("::1"), Port: 12345}, "::1"},
+		{&net.TCPAddr{IP: net.ParseIP("fe80::1"), Port: 12345, Zone: "eth0"}, "fe80::1"},
+		{&net.UDPAddr{IP: net.ParseIP("::1"), Port: 12345}, "::1"},
+	}
+	for _, tt := range tests {
+		if got := localIPAddress(tt.addr); got != tt.want {
+			t.Errorf("localIPAddress(%v) = %q, want %q", tt.addr, got, tt.want)
 		}
 	}
 }
