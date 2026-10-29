@@ -9,7 +9,7 @@ Usage:
   check_ajp [OPTIONS]
 
 Application Options:
-  -A, --useragent=   User-Agent header (default: check_http_go)
+  -A, --useragent=   User-Agent header (default: check_ajp (x.y.z))
   -a, --attr=        Attributes (auth, jvmRoute,...)
   -c, --crit=        Critical time in second (default: 10.0)
   -e, --expect=      Expected status codes (csv)
