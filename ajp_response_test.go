@@ -5,6 +5,8 @@ import (
 	"testing"
 )
 
+const testMaxBodySize = 1 << 20
+
 func packet(payload ...byte) []byte {
 	return append([]byte{'A', 'B', byte(len(payload) >> 8), byte(len(payload))}, payload...)
 }
@@ -32,7 +34,7 @@ func TestReadResponse(t *testing.T) {
 		packet(3, 0, 1, '!', 0),
 		packet(5, 1), // END_RESPONSE
 	)
-	res, err := readResponse(bytes.NewReader(data))
+	res, err := readResponse(bytes.NewReader(data), testMaxBodySize)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -67,7 +69,7 @@ func TestReadResponseMalformed(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := readResponse(bytes.NewReader(tt.data)); err == nil {
+			if _, err := readResponse(bytes.NewReader(tt.data), testMaxBodySize); err == nil {
 				t.Errorf("expected error")
 			}
 		})
@@ -81,7 +83,7 @@ func TestReadResponseKeepsPacketBoundary(t *testing.T) {
 		packet(3, 0, 2, 'o', 'k', 0),
 		packet(5, 1),
 	)
-	res, err := readResponse(bytes.NewReader(data))
+	res, err := readResponse(bytes.NewReader(data), testMaxBodySize)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -95,7 +97,7 @@ func TestReadResponseDateHeader(t *testing.T) {
 		packet(4, 0, 200, 0, 2, 'O', 'K', 0, 0, 1, 0xA0, 0x04, 0, 1, 'd', 0),
 		packet(5, 1),
 	)
-	res, err := readResponse(bytes.NewReader(data))
+	res, err := readResponse(bytes.NewReader(data), testMaxBodySize)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -115,6 +117,38 @@ func TestTitleHeaderName(t *testing.T) {
 	for in, want := range tests {
 		if got := titleHeaderName(in); got != want {
 			t.Errorf("titleHeaderName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestReadResponseMaxBodySize(t *testing.T) {
+	data := concat(
+		packet(4, 0, 200, 0, 2, 'O', 'K', 0, 0, 0),
+		packet(3, 0, 3, 'a', 'b', 'c', 0),
+		packet(3, 0, 3, 'd', 'e', 'f', 0),
+		packet(5, 1),
+	)
+	tests := []struct {
+		max  int
+		want string
+	}{
+		{0, ""},
+		{2, "ab"},
+		{3, "abc"},
+		{4, "abcd"},
+		{6, "abcdef"},
+		{100, "abcdef"},
+	}
+	for _, tt := range tests {
+		res, err := readResponse(bytes.NewReader(data), tt.max)
+		if err != nil {
+			t.Fatalf("max %d: unexpected error: %v", tt.max, err)
+		}
+		if string(res.Body) != tt.want || res.BodySize != 6 {
+			t.Errorf("max %d: body = %q, size = %d, want %q, 6", tt.max, res.Body, res.BodySize, tt.want)
+		}
+		if res.bodyTruncated() != (len(tt.want) < 6) {
+			t.Errorf("max %d: bodyTruncated() = %v", tt.max, res.bodyTruncated())
 		}
 	}
 }

@@ -51,6 +51,7 @@ type Options struct {
 	JsonValue  string   `long:"json-value"           description:"Expected json value"`
 	RemoteAddr string   `long:"remote-addr"          description:"RemoteAddr header value"`
 	RemoteHost string   `long:"remote-host"          description:"RemoteHost header value"`
+	MaxBody    int      `long:"max-body-size"        description:"Maximum response body size in bytes to keep (the rest is discarded)" default:"1048576"`
 }
 
 func parseHeaderOption(s string) (*RequestHeader, error) {
@@ -122,6 +123,11 @@ func main() {
 	if opts.Version {
 		fmt.Printf("check_ajp: %s\n", Version)
 		os.Exit(NagiosUnknown)
+	}
+	if opts.MaxBody < 0 {
+		nagiosStatusCode = NagiosUnknown
+		fmt.Printf("AJP %s - --max-body-size must be 0 or greater\n", NagiosStatus[nagiosStatusCode])
+		os.Exit(nagiosStatusCode)
 	}
 	if opts.Vhost != "" {
 		opts.Headers = append(opts.Headers, "Host: "+opts.Vhost)
@@ -208,7 +214,7 @@ func main() {
 		os.Exit(nagiosStatusCode)
 	}
 
-	res, err := readResponse(conn)
+	res, err := readResponse(conn, opts.MaxBody)
 	if err != nil {
 		nagiosStatusCode = NagiosCritical
 		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
@@ -232,6 +238,9 @@ func main() {
 	if len(opts.Verbose) > 1 {
 		fmt.Println("[RESPONSE BODY]")
 		fmt.Println(sanitizeOutput(string(res.Body), true))
+		if res.bodyTruncated() {
+			fmt.Printf("(truncated: showing %d of %d bytes)\n", len(res.Body), res.BodySize)
+		}
 		fmt.Println("")
 	}
 
@@ -266,7 +275,10 @@ func main() {
 		}
 		// https://reformatcode.com/code/json/taking-a-json-string-unmarshaling-it-into-a-mapstringinterface-editing-and-marshaling-it-into-a-byte-seems-more-complicated-then-it-should-be
 		var d map[string]interface{}
-		if err = json.Unmarshal(res.Body, &d); err != nil {
+		if res.bodyTruncated() {
+			nagiosStatusCode = NagiosCritical
+			resultMessage = fmt.Sprintf("response body (%d bytes) exceeds --max-body-size (%d bytes), cannot check JSON", res.BodySize, opts.MaxBody)
+		} else if err = json.Unmarshal(res.Body, &d); err != nil {
 			nagiosStatusCode = NagiosCritical
 			resultMessage = fmt.Sprintf("response body is not valid JSON: %s", err)
 		} else {
@@ -277,7 +289,9 @@ func main() {
 				resultMessage = fmt.Sprintf("`%s` is not `%s`", opts.JsonKey, opts.JsonValue)
 			}
 		}
-		additionalOut, err = prettyPrintJSON(res.Body)
+		if !res.bodyTruncated() {
+			additionalOut, err = prettyPrintJSON(res.Body)
+		}
 	}
 
 	if nagiosStatusCode == NagiosOk && diff.Seconds() > opts.Warn {
@@ -285,7 +299,7 @@ func main() {
 		resultMessage = fmt.Sprintf("response time %.3fs exceeded warning threshold %.3fs", diff.Seconds(), opts.Warn)
 	}
 
-	fmt.Printf("AJP %s: %d - %d bytes in %.3f second response time |time=%.6fs;;;%.6f size=%dB;;;0\n", NagiosStatus[nagiosStatusCode], res.StatusCode, len(res.Body), diff.Seconds(), diff.Seconds(), 0.0, len(res.Body))
+	fmt.Printf("AJP %s: %d - %d bytes in %.3f second response time |time=%.6fs;;;%.6f size=%dB;;;0\n", NagiosStatus[nagiosStatusCode], res.StatusCode, res.BodySize, diff.Seconds(), diff.Seconds(), 0.0, res.BodySize)
 	if resultMessage != "" {
 		fmt.Println(resultMessage)
 	}
