@@ -52,6 +52,7 @@ type Options struct {
 	RemoteAddr string   `long:"remote-addr"          description:"RemoteAddr header value"`
 	RemoteHost string   `long:"remote-host"          description:"RemoteHost header value"`
 	MaxBody    int      `long:"max-body-size"        description:"Maximum response body size in bytes to keep (the rest is discarded)" default:"1048576"`
+	PacketSize int      `long:"packet-size"          description:"AJP packet size in bytes (packetSize of the Tomcat AJP connector)" default:"8192"`
 }
 
 func parseHeaderOption(s string) (*RequestHeader, error) {
@@ -127,6 +128,11 @@ func main() {
 	if opts.MaxBody < 0 {
 		nagiosStatusCode = NagiosUnknown
 		fmt.Printf("AJP %s - --max-body-size must be 0 or greater\n", NagiosStatus[nagiosStatusCode])
+		os.Exit(nagiosStatusCode)
+	}
+	if opts.PacketSize < AJP13_DEFAULT_PACKET_SIZE || opts.PacketSize > AJP13_MAX_PACKET_SIZE {
+		nagiosStatusCode = NagiosUnknown
+		fmt.Printf("AJP %s - --packet-size must be between %d and %d\n", NagiosStatus[nagiosStatusCode], AJP13_DEFAULT_PACKET_SIZE, AJP13_MAX_PACKET_SIZE)
 		os.Exit(nagiosStatusCode)
 	}
 	if opts.Vhost != "" {
@@ -207,8 +213,14 @@ func main() {
 		req.RemoteHost = localaddr
 	}
 
-	err = req.sendRequest(conn)
+	packet, err := req.encode()
 	if err != nil {
+		nagiosStatusCode = NagiosUnknown
+		fmt.Printf("AJP %s - %s\n", NagiosStatus[nagiosStatusCode], err)
+		os.Exit(nagiosStatusCode)
+	}
+
+	if _, err = conn.Write(packet); err != nil {
 		nagiosStatusCode = NagiosCritical
 		fmt.Printf("AJP %s - %s\n", NagiosStatus[nagiosStatusCode], err)
 		os.Exit(nagiosStatusCode)

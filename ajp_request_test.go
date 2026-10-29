@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -43,7 +44,7 @@ func TestNewAttributeInvalid(t *testing.T) {
 	}
 }
 
-func TestSendRequestAttributes(t *testing.T) {
+func TestEncodeAttributes(t *testing.T) {
 	var attrs []*Attribute
 	for _, kv := range [][2]string{{"req_attribute", "foo=bar"}, {"ssl_key_size", "256"}, {"route", "n1"}} {
 		attr, err := newAttribute(kv[0], kv[1])
@@ -53,8 +54,8 @@ func TestSendRequestAttributes(t *testing.T) {
 		attrs = append(attrs, attr)
 	}
 	req := AJP13ForwardRequest{PrefixCode: JK_AJP13_FORWARD_REQUEST, Method: "GET", Attributes: attrs}
-	var buf bytes.Buffer
-	if err := req.sendRequest(&buf); err != nil {
+	packet, err := req.encode()
+	if err != nil {
 		t.Fatal(err)
 	}
 	want := []byte{
@@ -63,7 +64,70 @@ func TestSendRequestAttributes(t *testing.T) {
 		0x06, 0, 2, 'n', '1', 0, // route: string
 		0xFF, // request terminator
 	}
-	if !bytes.HasSuffix(buf.Bytes(), want) {
-		t.Errorf("encoded request = % x\nwant suffix      % x", buf.Bytes(), want)
+	if !bytes.HasSuffix(packet, want) {
+		t.Errorf("encoded request = % x\nwant suffix      % x", packet, want)
+	}
+}
+
+func TestEncodePacketSize(t *testing.T) {
+	base := AJP13ForwardRequest{PrefixCode: JK_AJP13_FORWARD_REQUEST, Method: "GET", ServerPort: 8009}
+	packet, err := base.encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(packet, []byte{0x12, 0x34}) {
+		t.Errorf("packet does not start with 0x12 0x34: % x", packet[:4])
+	}
+	if got := int(packet[2])<<8 | int(packet[3]); got != len(packet)-4 {
+		t.Errorf("data length = %d, want %d", got, len(packet)-4)
+	}
+
+	// grow the URI so that the packet is exactly the default packet size
+	req := base
+	req.Uri = strings.Repeat("a", AJP13_DEFAULT_PACKET_SIZE-len(packet))
+	if packet, err := req.encode(); err != nil || len(packet) != AJP13_DEFAULT_PACKET_SIZE {
+		t.Errorf("packet of %d bytes: err = %v", len(packet), err)
+	}
+	req.Uri += "a"
+	if _, err := req.encode(); err == nil {
+		t.Errorf("expected error for a packet larger than %d bytes", AJP13_DEFAULT_PACKET_SIZE)
+	}
+	req.PacketSize = AJP13_MAX_PACKET_SIZE
+	if _, err := req.encode(); err != nil {
+		t.Errorf("unexpected error with PacketSize %d: %v", req.PacketSize, err)
+	}
+
+	// 40,000 bytes URI used to overflow the int16 length field
+	req.Uri = strings.Repeat("a", 40000)
+	packet, err = req.encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := int(packet[2])<<8 | int(packet[3]); got != len(packet)-4 {
+		t.Errorf("data length = %d, want %d", got, len(packet)-4)
+	}
+
+	req.Uri = strings.Repeat("a", 0xFFFF)
+	if _, err := req.encode(); err == nil {
+		t.Errorf("expected error for a string of 0xFFFF bytes")
+	}
+}
+
+func TestEncodeInvalidValue(t *testing.T) {
+	req := AJP13ForwardRequest{PrefixCode: JK_AJP13_FORWARD_REQUEST, Method: "GET", ServerPort: 70000}
+	if _, err := req.encode(); err == nil {
+		t.Errorf("expected error for port 70000")
+	}
+}
+
+func TestEncodeLengthFieldOverflow(t *testing.T) {
+	// PacketSize is checked by main, but encode must not wrap the length
+	// field even if a larger PacketSize is given
+	req := AJP13ForwardRequest{PrefixCode: JK_AJP13_FORWARD_REQUEST, Method: "GET", PacketSize: 1 << 20}
+	for i := 0; i < 2; i++ {
+		req.Headers = append(req.Headers, &RequestHeader{Name: "x-long", Value: strings.Repeat("a", 40000)})
+	}
+	if _, err := req.encode(); err == nil {
+		t.Errorf("expected error for data longer than 0xFFFF bytes")
 	}
 }

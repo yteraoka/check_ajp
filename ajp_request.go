@@ -1,11 +1,9 @@
 package main
 
 import (
-	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/lunixbochs/struc"
-	"io"
 	"strconv"
 	"strings"
 )
@@ -84,6 +82,13 @@ var METHOD = map[string]int{
 
 const JK_AJP13_FORWARD_REQUEST = 0x02
 
+// Packet size limits, same as packetSize of the Tomcat AJP connector.
+// The packet size includes the 4 bytes header (0x12 0x34 and the length).
+const (
+	AJP13_DEFAULT_PACKET_SIZE = 8192
+	AJP13_MAX_PACKET_SIZE     = 65536
+)
+
 type RequestHeader struct {
 	Name  string
 	Value string
@@ -136,24 +141,7 @@ type AJP13ForwardRequest struct {
 	IsSsl      bool
 	Headers    []*RequestHeader
 	Attributes []*Attribute
-}
-
-type encodeBool struct {
-	Value bool `struc:"bool"`
-}
-
-type encodeInt8 struct {
-	Value int `struc:"uint8"`
-}
-
-type encodeInt16 struct {
-	Value int `struc:"int16"`
-}
-
-type encodeString struct {
-	Size      int    `struc:"uint16,sizeof=Value"`
-	Value     string `struc:[]byte`
-	Terminate []byte `struc:"[1]pad"`
+	PacketSize int // AJP13_DEFAULT_PACKET_SIZE if 0
 }
 
 func newAJP13ForwardRequest(o Options) AJP13ForwardRequest {
@@ -165,6 +153,7 @@ func newAJP13ForwardRequest(o Options) AJP13ForwardRequest {
 	r.Uri = o.Uri
 	r.ServerName = o.Ipaddr
 	r.ServerPort = o.Port
+	r.PacketSize = o.PacketSize
 	if o.RemoteAddr != "" {
 		r.RemoteAddr = o.RemoteAddr
 	}
@@ -174,33 +163,57 @@ func newAJP13ForwardRequest(o Options) AJP13ForwardRequest {
 	return r
 }
 
-// requestEncoder keeps the first error returned by struc.Pack so that the
-// caller only has to check it once after encoding the whole packet.
+// requestEncoder keeps the first error so that the caller only has to check
+// it once after encoding the whole packet.
 type requestEncoder struct {
-	buf bytes.Buffer
+	buf []byte
 	err error
 }
 
-func (e *requestEncoder) pack(data interface{}) {
+func (e *requestEncoder) setError(err error) {
 	if e.err == nil {
-		e.err = struc.Pack(&e.buf, data)
+		e.err = err
 	}
 }
 
+func (e *requestEncoder) appendBytes(b []byte) {
+	e.buf = append(e.buf, b...)
+}
+
 func (e *requestEncoder) appendUint16(i int) {
-	e.pack(&encodeInt16{Value: i})
+	if i < 0 || i > 0xFFFF {
+		e.setError(fmt.Errorf("value %d does not fit in uint16", i))
+		return
+	}
+	e.buf = binary.BigEndian.AppendUint16(e.buf, uint16(i))
 }
 
 func (e *requestEncoder) appendByte(i int) {
-	e.pack(&encodeInt8{Value: i})
+	if i < 0 || i > 0xFF {
+		e.setError(fmt.Errorf("value %d does not fit in a byte", i))
+		return
+	}
+	e.buf = append(e.buf, byte(i))
 }
 
+// appendString appends the length, the string and the 0x00 terminator.
+// The length 0xFFFF is reserved for a null string.
 func (e *requestEncoder) appendString(s string) {
-	e.pack(&encodeString{Value: s})
+	if len(s) >= 0xFFFF {
+		e.setError(fmt.Errorf("string is too long (%d bytes)", len(s)))
+		return
+	}
+	e.appendUint16(len(s))
+	e.buf = append(e.buf, s...)
+	e.buf = append(e.buf, 0x00)
 }
 
 func (e *requestEncoder) appendBool(b bool) {
-	e.pack(&encodeBool{Value: b})
+	if b {
+		e.buf = append(e.buf, 0x01)
+	} else {
+		e.buf = append(e.buf, 0x00)
+	}
 }
 
 func (r *AJP13ForwardRequest) validate() error {
@@ -213,8 +226,20 @@ func (r *AJP13ForwardRequest) validate() error {
 	return err
 }
 
-func (r *AJP13ForwardRequest) sendRequest(w io.Writer) error {
+// encode returns the whole forward request packet. It fails if the packet
+// exceeds PacketSize.
+func (r *AJP13ForwardRequest) encode() ([]byte, error) {
+	packetSize := r.PacketSize
+	if packetSize == 0 {
+		packetSize = AJP13_DEFAULT_PACKET_SIZE
+	}
+
+	// Packet Format (Server->Container)
+	// Byte       0       1       2       3       4...(n+3)
+	// Contents   0x12    0x34    Data Length (n) Data
+	// The length is filled in after encoding the data.
 	var data requestEncoder
+	data.appendBytes([]byte{0x12, 0x34, 0x00, 0x00})
 	data.appendByte(r.PrefixCode)
 	data.appendByte(METHOD[r.Method])
 	data.appendString(r.Protocol)
@@ -230,7 +255,7 @@ func (r *AJP13ForwardRequest) sendRequest(w io.Writer) error {
 
 	for _, hdr := range r.Headers {
 		if SC_REQ_HEADER[strings.ToLower(hdr.Name)] != nil {
-			data.buf.Write(SC_REQ_HEADER[strings.ToLower(hdr.Name)])
+			data.appendBytes(SC_REQ_HEADER[strings.ToLower(hdr.Name)])
 		} else {
 			data.appendString(strings.ToLower(hdr.Name))
 		}
@@ -239,7 +264,7 @@ func (r *AJP13ForwardRequest) sendRequest(w io.Writer) error {
 
 	// Attributes
 	for _, attr := range r.Attributes {
-		data.buf.Write(attr.Code)
+		data.appendBytes(attr.Code)
 		switch attr.Code[0] {
 		case SC_A_REQ_ATTRIBUTE:
 			data.appendString(attr.Name)
@@ -251,22 +276,18 @@ func (r *AJP13ForwardRequest) sendRequest(w io.Writer) error {
 		}
 	}
 
-	data.buf.Write([]byte{0xff})
+	data.appendBytes([]byte{0xff})
 	if data.err != nil {
-		return data.err
+		return nil, data.err
 	}
 
-	// Packet Format (Server->Container)
-	// Byte       0       1       2       3       4...(n+3)
-	// Contents   0x12    0x34    Data Length (n) Data
-	var packet requestEncoder
-	packet.buf.Write([]byte{0x12, 0x34})
-	packet.appendUint16(data.buf.Len())
-	packet.buf.Write(data.buf.Bytes())
-	if packet.err != nil {
-		return packet.err
+	if len(data.buf) > packetSize {
+		return nil, fmt.Errorf("request packet is %d bytes, which exceeds the AJP packet size %d bytes (--packet-size)", len(data.buf), packetSize)
 	}
-
-	_, err := w.Write(packet.buf.Bytes())
-	return err
+	n := len(data.buf) - 4
+	if n < 0 || n > 0xFFFF {
+		return nil, fmt.Errorf("request data is %d bytes, which does not fit in the length field", n)
+	}
+	binary.BigEndian.PutUint16(data.buf[2:4], uint16(n))
+	return data.buf, nil
 }

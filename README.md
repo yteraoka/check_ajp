@@ -31,6 +31,8 @@ Application Options:
       --remote-host=   RemoteHost header value
       --max-body-size= Maximum response body size in bytes to keep (the rest is
                        discarded) (default: 1048576)
+      --packet-size=   AJP packet size in bytes (packetSize of the Tomcat AJP
+                       connector) (default: 8192)
 
 Help Options:
   -h, --help           Show this help message
