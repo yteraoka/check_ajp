@@ -43,37 +43,37 @@ var SC_REQ_ATTR = map[string][]byte{
 }
 
 var METHOD = map[string]int{
-	"GET":              2,
-	"HEAD":             3,
-/*
-	Other methods are not supported yet.
+	"GET":  2,
+	"HEAD": 3,
+	/*
+	   Other methods are not supported yet.
 
-	"OPTIONS":          1,
-	"POST":             4,
-	"PUT":              5,
-	"DELETE":           6,
-	"TRACE":            7,
-	"PROPFIND":         8,
-	"PROPPATCH":        9,
-	"MKCOL":            10,
-	"COPY":             11,
-	"MOVE":             12,
-	"LOCK":             13,
-	"UNLOCK":           14,
-	"ACL":              15,
-	"REPORT":           16,
-	"VERSION-CONTROL":  17,
-	"CHECKIN":          18,
-	"CHECKOUT":         19,
-	"UNCHECKOUT":       20,
-	"SEARCH":           21,
-	"MKWORKSPACE":      22,
-	"UPDATE":           23,
-	"LABEL":            24,
-	"MERGE":            25,
-	"BASELINE_CONTROL": 26,
-	"MKACTIVITY":       27,
-*/
+	   "OPTIONS":          1,
+	   "POST":             4,
+	   "PUT":              5,
+	   "DELETE":           6,
+	   "TRACE":            7,
+	   "PROPFIND":         8,
+	   "PROPPATCH":        9,
+	   "MKCOL":            10,
+	   "COPY":             11,
+	   "MOVE":             12,
+	   "LOCK":             13,
+	   "UNLOCK":           14,
+	   "ACL":              15,
+	   "REPORT":           16,
+	   "VERSION-CONTROL":  17,
+	   "CHECKIN":          18,
+	   "CHECKOUT":         19,
+	   "UNCHECKOUT":       20,
+	   "SEARCH":           21,
+	   "MKWORKSPACE":      22,
+	   "UPDATE":           23,
+	   "LABEL":            24,
+	   "MERGE":            25,
+	   "BASELINE_CONTROL": 26,
+	   "MKACTIVITY":       27,
+	*/
 }
 
 const JK_AJP13_FORWARD_REQUEST = 0x02
@@ -143,20 +143,33 @@ func (r *AJP13ForwardRequest) appendHeader(header string) {
 	r.Headers = append(r.Headers, &RequestHeader{Name: strings.ToLower(hdr[0]), Value: hdr[1]})
 }
 
-func appendUint16(buf *bytes.Buffer, i int) {
-	struc.Pack(buf, &encodeInt16{Value: i})
+// requestEncoder keeps the first error returned by struc.Pack so that the
+// caller only has to check it once after encoding the whole packet.
+type requestEncoder struct {
+	buf bytes.Buffer
+	err error
 }
 
-func appendByte(buf *bytes.Buffer, i int) {
-	struc.Pack(buf, &encodeInt8{Value: i})
+func (e *requestEncoder) pack(data interface{}) {
+	if e.err == nil {
+		e.err = struc.Pack(&e.buf, data)
+	}
 }
 
-func appendString(buf *bytes.Buffer, s string) {
-	struc.Pack(buf, &encodeString{Value: s})
+func (e *requestEncoder) appendUint16(i int) {
+	e.pack(&encodeInt16{Value: i})
 }
 
-func appendBool(buf *bytes.Buffer, b bool) {
-	struc.Pack(buf, &encodeBool{Value: b})
+func (e *requestEncoder) appendByte(i int) {
+	e.pack(&encodeInt8{Value: i})
+}
+
+func (e *requestEncoder) appendString(s string) {
+	e.pack(&encodeString{Value: s})
+}
+
+func (e *requestEncoder) appendBool(b bool) {
+	e.pack(&encodeBool{Value: b})
 }
 
 func (r *AJP13ForwardRequest) validate() error {
@@ -170,47 +183,51 @@ func (r *AJP13ForwardRequest) validate() error {
 }
 
 func (r *AJP13ForwardRequest) sendRequest(w io.Writer) error {
-	var err error
-
-	var buf bytes.Buffer
-	appendByte(&buf, r.PrefixCode)
-	appendByte(&buf, METHOD[r.Method])
-	appendString(&buf, r.Protocol)
-	appendString(&buf, r.Uri)
-	appendString(&buf, r.RemoteAddr)
-	appendString(&buf, r.RemoteHost)
-	appendString(&buf, r.ServerName)
-	appendUint16(&buf, r.ServerPort)
-	appendBool(&buf, r.IsSsl)
+	var data requestEncoder
+	data.appendByte(r.PrefixCode)
+	data.appendByte(METHOD[r.Method])
+	data.appendString(r.Protocol)
+	data.appendString(r.Uri)
+	data.appendString(r.RemoteAddr)
+	data.appendString(r.RemoteHost)
+	data.appendString(r.ServerName)
+	data.appendUint16(r.ServerPort)
+	data.appendBool(r.IsSsl)
 
 	// Headers
-	appendUint16(&buf, len(r.Headers))
+	data.appendUint16(len(r.Headers))
 
 	for _, hdr := range r.Headers {
 		if SC_REQ_HEADER[strings.ToLower(hdr.Name)] != nil {
-			buf.Write(SC_REQ_HEADER[strings.ToLower(hdr.Name)])
+			data.buf.Write(SC_REQ_HEADER[strings.ToLower(hdr.Name)])
 		} else {
-			appendString(&buf, strings.ToLower(hdr.Name))
+			data.appendString(strings.ToLower(hdr.Name))
 		}
-		appendString(&buf, hdr.Value)
+		data.appendString(hdr.Value)
 	}
 
 	// Attributes
 	for _, attr := range r.Attributes {
-		buf.Write(attr.Code)
-		appendString(&buf, attr.Value)
+		data.buf.Write(attr.Code)
+		data.appendString(attr.Value)
 	}
 
-	buf.Write([]byte{0xff})
+	data.buf.Write([]byte{0xff})
+	if data.err != nil {
+		return data.err
+	}
 
 	// Packet Format (Server->Container)
 	// Byte       0       1       2       3       4...(n+3)
 	// Contents   0x12    0x34    Data Length (n) Data
-	_, err = w.Write([]byte{0x12, 0x34})
-	if err = struc.Pack(w, &encodeInt16{Value: buf.Len()}); err != nil {
-		return err
+	var packet requestEncoder
+	packet.buf.Write([]byte{0x12, 0x34})
+	packet.appendUint16(data.buf.Len())
+	packet.buf.Write(data.buf.Bytes())
+	if packet.err != nil {
+		return packet.err
 	}
-	_, err = w.Write(buf.Bytes())
 
+	_, err := w.Write(packet.buf.Bytes())
 	return err
 }
