@@ -78,7 +78,9 @@ func readByte(r *bytes.Reader, n int) ([]byte, error) {
 		return nil, errShortPacket
 	}
 	data := make([]byte, n)
-	r.Read(data)
+	if _, err := io.ReadFull(r, data); err != nil {
+		return nil, errShortPacket
+	}
 	return data, nil
 }
 

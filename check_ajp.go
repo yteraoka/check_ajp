@@ -165,8 +165,11 @@ func main() {
 
 	// set read/write timeout
 	deadline := time.Now().Add(time.Duration(opts.Crit) * time.Second)
-	conn.SetReadDeadline(deadline)
-	conn.SetWriteDeadline(deadline)
+	if err = conn.SetDeadline(deadline); err != nil {
+		nagiosStatusCode = NagiosUnknown
+		fmt.Printf("AJP %s - %s\n", NagiosStatus[nagiosStatusCode], err)
+		os.Exit(nagiosStatusCode)
+	}
 
 	localaddr := conn.LocalAddr().String()
 	localaddr = localaddr[0:strings.Index(localaddr, ":")]
@@ -243,12 +246,16 @@ func main() {
 		}
 		// https://reformatcode.com/code/json/taking-a-json-string-unmarshaling-it-into-a-mapstringinterface-editing-and-marshaling-it-into-a-byte-seems-more-complicated-then-it-should-be
 		var d map[string]interface{}
-		json.Unmarshal(res.Body, &d)
-		// https://qiita.com/hnakamur/items/c3560a4b780487ef6065
-		v, _ := dyno.Get(d, s...)
-		if v != opts.JsonValue {
+		if err = json.Unmarshal(res.Body, &d); err != nil {
 			nagiosStatusCode = NagiosCritical
-			resultMessage = fmt.Sprintf("`%s` is not `%s`", opts.JsonKey, opts.JsonValue)
+			resultMessage = fmt.Sprintf("response body is not valid JSON: %s", err)
+		} else {
+			// https://qiita.com/hnakamur/items/c3560a4b780487ef6065
+			v, _ := dyno.Get(d, s...)
+			if v != opts.JsonValue {
+				nagiosStatusCode = NagiosCritical
+				resultMessage = fmt.Sprintf("`%s` is not `%s`", opts.JsonKey, opts.JsonValue)
+			}
 		}
 		additionalOut, err = prettyPrintJSON(res.Body)
 	}
