@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestSanitizeOutput(t *testing.T) {
 	tests := []struct {
@@ -21,6 +24,21 @@ func TestSanitizeOutput(t *testing.T) {
 	for _, tt := range tests {
 		if got := sanitizeOutput(tt.in, tt.multiline); got != tt.want {
 			t.Errorf("sanitizeOutput(%q, %v) = %q, want %q", tt.in, tt.multiline, got, tt.want)
+		}
+	}
+}
+
+func TestSecondsToDuration(t *testing.T) {
+	tests := map[float64]time.Duration{
+		1.0:   time.Second,
+		0.5:   500 * time.Millisecond,
+		2.5:   2500 * time.Millisecond,
+		0.001: time.Millisecond,
+		0:     0,
+	}
+	for in, want := range tests {
+		if got := secondsToDuration(in); got != want {
+			t.Errorf("secondsToDuration(%v) = %v, want %v", in, got, want)
 		}
 	}
 }
