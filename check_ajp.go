@@ -94,6 +94,12 @@ func sanitizeOutput(s string, multiline bool) string {
 	return b.String()
 }
 
+// secondsToDuration converts seconds given as a float into a time.Duration
+// without dropping the fractional part (time.Duration(0.5)*time.Second is 0).
+func secondsToDuration(sec float64) time.Duration {
+	return time.Duration(sec * float64(time.Second))
+}
+
 func prettyPrintJSON(b []byte) ([]byte, error) {
 	var out bytes.Buffer
 	err := json.Indent(&out, b, "", "    ")
@@ -146,11 +152,11 @@ func main() {
 		os.Exit(nagiosStatusCode)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(opts.Timeout)*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), secondsToDuration(opts.Timeout))
 	defer cancel()
 
 	var dial net.Dialer
-	dial.Timeout = time.Duration(opts.Timeout) * time.Second
+	dial.Timeout = secondsToDuration(opts.Timeout)
 
 	remote := opts.Ipaddr + ":" + strconv.Itoa(opts.Port)
 
@@ -165,7 +171,7 @@ func main() {
 	defer conn.Close()
 
 	// set read/write timeout
-	deadline := time.Now().Add(time.Duration(opts.Crit) * time.Second)
+	deadline := time.Now().Add(secondsToDuration(opts.Crit))
 	if err = conn.SetDeadline(deadline); err != nil {
 		nagiosStatusCode = NagiosUnknown
 		fmt.Printf("AJP %s - %s\n", NagiosStatus[nagiosStatusCode], err)
