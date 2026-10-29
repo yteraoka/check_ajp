@@ -118,7 +118,7 @@ func main() {
 	if opts.Vhost != "" {
 		opts.Headers = append(opts.Headers, "Host: "+opts.Vhost)
 	}
-	if opts.UserAgent != "" {
+	if opts.UserAgent == "" {
 		opts.UserAgent = fmt.Sprintf("check_ajp (%s)", Version)
 	}
 	opts.Headers = append(opts.Headers, "User-Agent: "+opts.UserAgent)
