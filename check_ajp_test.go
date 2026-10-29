@@ -2,6 +2,8 @@ package main
 
 import (
 	"net"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -117,5 +119,70 @@ func TestLocalIPAddress(t *testing.T) {
 		if got := localIPAddress(tt.addr); got != tt.want {
 			t.Errorf("localIPAddress(%v) = %q, want %q", tt.addr, got, tt.want)
 		}
+	}
+}
+
+func TestSecretAttribute(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, content string) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	lf := write("lf", "s3cret\n")
+	crlf := write("crlf", "s3cret\r\n")
+	spaces := write("spaces", " s3 cret \n")
+	empty := write("empty", "\n")
+
+	tests := []struct {
+		name       string
+		attributes []string
+		secretFile string
+		env        string
+		want       string // "" means no attribute is added
+	}{
+		{"none", nil, "", "", ""},
+		{"file", nil, lf, "", "s3cret"},
+		{"file with CRLF", nil, crlf, "", "s3cret"},
+		{"file keeps spaces", nil, spaces, "", " s3 cret "},
+		{"env", nil, "", "fromenv", "fromenv"},
+		{"file takes precedence over env", nil, lf, "fromenv", "s3cret"},
+		{"-a takes precedence over env", []string{"SECRET=fromarg"}, "", "fromenv", ""},
+		{"other attributes", []string{"route=n1"}, "", "fromenv", "fromenv"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("AJP_SECRET", tt.env)
+			attr, err := secretAttribute(tt.attributes, tt.secretFile)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tt.want == "" {
+				if attr != nil {
+					t.Errorf("attribute = %+v, want nil", *attr)
+				}
+				return
+			}
+			if attr == nil || attr.Code[0] != 0x0C || attr.Value != tt.want {
+				t.Errorf("attribute = %+v, want secret %q", attr, tt.want)
+			}
+		})
+	}
+
+	for name, tt := range map[string]struct {
+		attributes []string
+		secretFile string
+	}{
+		"-a and --secret-file": {[]string{"secret=x"}, lf},
+		"empty file":           {nil, empty},
+		"missing file":         {nil, filepath.Join(dir, "missing")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := secretAttribute(tt.attributes, tt.secretFile); err == nil {
+				t.Errorf("expected error")
+			}
+		})
 	}
 }

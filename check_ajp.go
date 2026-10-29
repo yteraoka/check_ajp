@@ -9,6 +9,7 @@ import (
 	flags "github.com/jessevdk/go-flags"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -53,6 +54,7 @@ type Options struct {
 	RemoteHost string   `long:"remote-host"          description:"RemoteHost header value"`
 	MaxBody    int      `long:"max-body-size"        description:"Maximum response body size in bytes to keep (the rest is discarded)" default:"1048576"`
 	PacketSize int      `long:"packet-size"          description:"AJP packet size in bytes (packetSize of the Tomcat AJP connector)" default:"8192"`
+	SecretFile string   `long:"secret-file"          description:"File to read the AJP secret from (default: AJP_SECRET environment variable)"`
 }
 
 func parseHeaderOption(s string) (*RequestHeader, error) {
@@ -95,6 +97,39 @@ func sanitizeOutput(s string, multiline bool) string {
 		i += size
 	}
 	return b.String()
+}
+
+// secretAttribute returns the secret attribute read from --secret-file or the
+// AJP_SECRET environment variable, so that the secret does not have to be given
+// on the command line. It returns nil if the secret is given with -a, or if no
+// secret is given at all.
+func secretAttribute(attributes []string, secretFile string) (*Attribute, error) {
+	for _, a := range attributes {
+		if strings.EqualFold(strings.SplitN(a, "=", 2)[0], "secret") {
+			if secretFile != "" {
+				return nil, fmt.Errorf("-a secret=... and --secret-file cannot be used together")
+			}
+			return nil, nil
+		}
+	}
+
+	var secret string
+	if secretFile != "" {
+		b, err := os.ReadFile(filepath.Clean(secretFile))
+		if err != nil {
+			return nil, fmt.Errorf("failed to read --secret-file: %w", err)
+		}
+		secret = strings.TrimRight(string(b), "\r\n")
+		if secret == "" {
+			return nil, fmt.Errorf("--secret-file %s is empty", secretFile)
+		}
+	} else {
+		secret = os.Getenv("AJP_SECRET")
+	}
+	if secret == "" {
+		return nil, nil
+	}
+	return newAttribute("secret", secret)
 }
 
 // trimIPv6Brackets removes the brackets of an IPv6 address given as [::1]
@@ -190,6 +225,16 @@ func main() {
 			os.Exit(nagiosStatusCode)
 		}
 		req.Attributes = append(req.Attributes, attr)
+	}
+
+	secret, err := secretAttribute(opts.Attributes, opts.SecretFile)
+	if err != nil {
+		nagiosStatusCode = NagiosUnknown
+		fmt.Printf("AJP %s - %s\n", NagiosStatus[nagiosStatusCode], err)
+		os.Exit(nagiosStatusCode)
+	}
+	if secret != nil {
+		req.Attributes = append(req.Attributes, secret)
 	}
 
 	if err = req.validate(); err != nil {
