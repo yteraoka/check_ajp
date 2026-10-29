@@ -1,8 +1,8 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -68,135 +68,133 @@ func (r *AJP13Response) header(name string) []string {
 	return result
 }
 
-func readByte(r io.Reader, n int) ([]byte, error) {
+var errShortPacket = errors.New("malformed AJP packet: payload is shorter than expected")
+
+// The read* helpers parse fields from a single packet payload that has already
+// been read entirely into memory, so they never read beyond the packet boundary.
+
+func readByte(r *bytes.Reader, n int) ([]byte, error) {
+	if n < 0 || n > r.Len() {
+		return nil, errShortPacket
+	}
 	data := make([]byte, n)
-	_, err := io.ReadFull(r, data)
-	if err != nil {
-		return data, err
-	}
-	return data, err
+	r.Read(data)
+	return data, nil
 }
 
-func readBool(r io.Reader) (bool, error) {
-	var b bool
-	data, err := readByte(r, 1)
+func readBool(r *bytes.Reader) (bool, error) {
+	b, err := r.ReadByte()
 	if err != nil {
-		return b, err
+		return false, errShortPacket
 	}
-	if data[0] == byte(0x00) {
-		b = false
-	} else {
-		b = true
-	}
-	return b, err
+	return b != 0x00, nil
 }
 
-func readString(r io.Reader) (string, error) {
-	var len uint16
-	err := binary.Read(r, binary.BigEndian, &len)
+func readString(r *bytes.Reader) (string, error) {
+	len, err := readUint16(r)
 	if err != nil {
 		return "", err
 	}
-	return readStringN(r, int(len))
+	// 0xFFFF means a null string, which has no terminator
+	if len == 0xFFFF {
+		return "", nil
+	}
+	return readStringN(r, len)
 }
 
-func readStringN(r io.Reader, len int) (string, error) {
-	data := make([]byte, len+1)
-	_, err := io.ReadFull(r, data)
+func readStringN(r *bytes.Reader, len int) (string, error) {
+	data, err := readByte(r, len+1)
 	if err != nil {
-		return string(data), err
+		return "", err
 	}
-	return string(data[0:len]), err
+	if data[len] != 0x00 {
+		return "", errors.New("malformed AJP packet: string is not terminated by 0x00")
+	}
+	return string(data[0:len]), nil
 }
 
-func readUint16(r io.Reader) (int, error) {
-	var len uint16
-	err := binary.Read(r, binary.BigEndian, &len)
-	if err != nil {
-		return int(len), err
+func readUint16(r *bytes.Reader) (int, error) {
+	if r.Len() < 2 {
+		return 0, errShortPacket
 	}
-	return int(len), err
+	hi, _ := r.ReadByte()
+	lo, _ := r.ReadByte()
+	return int(hi)<<8 | int(lo), nil
 }
 
-func readUint8(r io.Reader) (int, error) {
-	var b uint8
-	err := binary.Read(r, binary.BigEndian, &b)
+func readUint8(r *bytes.Reader) (int, error) {
+	b, err := r.ReadByte()
 	if err != nil {
-		return int(b), err
+		return 0, errShortPacket
 	}
-	return int(b), err
+	return int(b), nil
+}
+
+// readPacket reads one AJP packet from the container and returns its payload
+func readPacket(r io.Reader) ([]byte, error) {
+	header := make([]byte, 4)
+	if _, err := io.ReadFull(r, header); err != nil {
+		return nil, err
+	}
+	if header[0] != 'A' || header[1] != 'B' {
+		return nil, fmt.Errorf("unknown direction: %v", header[0:2])
+	}
+	segmentSize := int(header[2])<<8 | int(header[3])
+	payload := make([]byte, segmentSize)
+	if _, err := io.ReadFull(r, payload); err != nil {
+		return nil, err
+	}
+	return payload, nil
 }
 
 func readResponse(conn io.Reader) (AJP13Response, error) {
 	var res AJP13Response
-	var err error
-READ_RESPONSE:
+	br := bufio.NewReader(conn)
 	for {
-		direction, err := readByte(conn, 2)
+		payload, err := readPacket(br)
 		if err != nil {
 			return res, err
 		}
-		if bytes.Compare(direction, []byte("AB")) != 0 {
-			return res, errors.New(fmt.Sprintf("unknown direction: %v", direction))
-		}
-		segmentSize, err := readUint16(conn)
-		if err != nil {
-			return res, err
-		}
+		r := bytes.NewReader(payload)
 
-		prefix, err := readUint8(conn)
+		prefix, err := readUint8(r)
 		if err != nil {
 			return res, err
 		}
-		segmentSize -= 1
 
 		switch prefix {
 		case AJP13_SEND_BODY_CHUNK:
-			// fmt.Println("AJP13_SEND_BODY_CHUNK")
-			chunkLength, err := readUint16(conn)
+			chunkLength, err := readUint16(r)
 			if err != nil {
 				return res, err
 			}
-			segmentSize -= 2
-			chunk, err := readByte(conn, chunkLength)
+			chunk, err := readByte(r, chunkLength)
 			if err != nil {
 				return res, err
 			}
+			// remaining bytes (e.g. the trailing 0x00) are ignored
 			res.Body = append(res.Body, chunk...)
-			if segmentSize != chunkLength {
-				_, err = readByte(conn, segmentSize-chunkLength)
-				if err != nil {
-					return res, err
-				}
-			}
 		case AJP13_SEND_HEADERS:
-			// fmt.Println("AJP13_SEND_HEADERS")
-			err = readResponseHeaders(conn, &res)
+			err = readResponseHeaders(r, &res)
 			if err != nil {
 				return res, err
 			}
 		case AJP13_END_RESPONSE:
-			// fmt.Println("AJP13_END_RESPONSE")
-			_, err = readBool(conn)
+			_, err = readBool(r) // reuse
 			if err != nil {
 				return res, err
 			}
-			// reuse := readBool(conn)
-			// fmt.Printf("reuse = %v\n", reuse)
-			segmentSize -= 1
-			if segmentSize != 0 {
+			if r.Len() != 0 {
 				fmt.Fprintf(os.Stderr, "[WARNING] read remain unknown package\n")
-				_, err = readByte(conn, segmentSize-1)
-				if err != nil {
-					return res, err
-				}
 			}
-			break READ_RESPONSE
+			return res, nil
 		case AJP13_GET_BODY_CHUNK:
-			panic("GET_BODY_CHUNK response is not yet supported")
+			return res, errors.New("GET_BODY_CHUNK response is not yet supported")
+		default:
+			// unknown packet: the whole payload has been consumed, so just skip it
+			fmt.Fprintf(os.Stderr, "[WARNING] skip unknown packet type: %d\n", prefix)
 		}
 	}
-	return res, err
 }
 
 func (r *AJP13Response) dumpHeader() {
@@ -207,15 +205,13 @@ func (r *AJP13Response) dumpHeader() {
 	}
 }
 
-func readResponseHeaders(r io.Reader, res *AJP13Response) error {
+func readResponseHeaders(r *bytes.Reader, res *AJP13Response) error {
 	var err error
 	// [1, 2] status
 	res.StatusCode, err = readUint16(r)
 	if err != nil {
 		return err
 	}
-
-	// pos := 3 // skip prefix and status
 
 	// [3,4] length
 	// [5...] string
@@ -239,10 +235,7 @@ func readResponseHeaders(r io.Reader, res *AJP13Response) error {
 		if header_code[0] == byte(0xa0) {
 			header_name = SC_RES_HEADER[string(header_code)]
 		} else {
-			len, err := readUint16(bytes.NewBuffer(header_code))
-			if err != nil {
-				return err
-			}
+			len := int(header_code[0])<<8 | int(header_code[1])
 			header_name, err = readStringN(r, len)
 			if err != nil {
 				return err
@@ -254,5 +247,5 @@ func readResponseHeaders(r io.Reader, res *AJP13Response) error {
 		}
 		res.Headers = append(res.Headers, &ResponseHeader{Name: header_name, Value: header_value})
 	}
-	return err
+	return nil
 }
