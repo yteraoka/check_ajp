@@ -60,11 +60,12 @@ func parseHeaderOption(s string) *RequestHeader {
 
 func parseAttributeOption(s string) *Attribute {
 	parts := strings.SplitN(s, "=", 2)
-	if SC_REQ_ATTR[strings.ToLower(parts[0])] == nil {
-		fmt.Printf("unknown attribute: %s\n", s)
+	attr, err := newAttribute(parts[0], parts[1])
+	if err != nil {
+		fmt.Println(err)
 		os.Exit(NagiosUnknown)
 	}
-	return &Attribute{Code: SC_REQ_ATTR[strings.ToLower(parts[0])], Value: parts[1]}
+	return attr
 }
 
 // sanitizeOutput makes text received from the server safe to print as plugin

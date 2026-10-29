@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/lunixbochs/struc"
 	"io"
+	"strconv"
 	"strings"
 )
 
@@ -26,6 +27,11 @@ var SC_REQ_HEADER = map[string][]byte{
 	"user-agent":      {0xA0, 0x0E},
 }
 
+const (
+	SC_A_REQ_ATTRIBUTE byte = 0x0A
+	SC_A_SSL_KEY_SIZE  byte = 0x0B
+)
+
 var SC_REQ_ATTR = map[string][]byte{
 	"context":       {0x01}, // Not currently implemented
 	"servlet_path":  {0x02}, // Not currently implemented
@@ -36,8 +42,8 @@ var SC_REQ_ATTR = map[string][]byte{
 	"ssl_cert":      {0x07},
 	"ssl_cipher":    {0x08},
 	"ssl_session":   {0x09},
-	"req_attribute": {0x0A}, // Name (the name of the attribut follows)
-	"ssl_key_size":  {0x0B},
+	"req_attribute": {SC_A_REQ_ATTRIBUTE}, // Name and Value
+	"ssl_key_size":  {SC_A_SSL_KEY_SIZE},  // Integer
 	"secret":        {0x0C},
 	"stored_method": {0x0D},
 }
@@ -84,8 +90,38 @@ type RequestHeader struct {
 }
 
 type Attribute struct {
-	Code  []byte
-	Value string
+	Code    []byte
+	Name    string // req_attribute only
+	Value   string
+	KeySize int // ssl_key_size only
+}
+
+// newAttribute parses the value of an attribute given as key=value.
+// req_attribute takes name=value, and ssl_key_size takes an integer.
+func newAttribute(key, value string) (*Attribute, error) {
+	code := SC_REQ_ATTR[strings.ToLower(key)]
+	if code == nil {
+		return nil, fmt.Errorf("unknown attribute: %s", key)
+	}
+	attr := &Attribute{Code: code}
+	switch code[0] {
+	case SC_A_REQ_ATTRIBUTE:
+		parts := strings.SplitN(value, "=", 2)
+		if len(parts) != 2 || parts[0] == "" {
+			return nil, fmt.Errorf("req_attribute must be given as req_attribute=name=value: %s", value)
+		}
+		attr.Name = parts[0]
+		attr.Value = parts[1]
+	case SC_A_SSL_KEY_SIZE:
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 0 || n > 0xFFFF {
+			return nil, fmt.Errorf("ssl_key_size must be an integer between 0 and 65535: %s", value)
+		}
+		attr.KeySize = n
+	default:
+		attr.Value = value
+	}
+	return attr, nil
 }
 
 type AJP13ForwardRequest struct {
@@ -209,7 +245,15 @@ func (r *AJP13ForwardRequest) sendRequest(w io.Writer) error {
 	// Attributes
 	for _, attr := range r.Attributes {
 		data.buf.Write(attr.Code)
-		data.appendString(attr.Value)
+		switch attr.Code[0] {
+		case SC_A_REQ_ATTRIBUTE:
+			data.appendString(attr.Name)
+			data.appendString(attr.Value)
+		case SC_A_SSL_KEY_SIZE:
+			data.appendUint16(attr.KeySize)
+		default:
+			data.appendString(attr.Value)
+		}
 	}
 
 	data.buf.Write([]byte{0xff})
