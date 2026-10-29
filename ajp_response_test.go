@@ -89,3 +89,32 @@ func TestReadResponseKeepsPacketBoundary(t *testing.T) {
 		t.Errorf("body = %q", res.Body)
 	}
 }
+
+func TestReadResponseDateHeader(t *testing.T) {
+	data := concat(
+		packet(4, 0, 200, 0, 2, 'O', 'K', 0, 0, 1, 0xA0, 0x04, 0, 1, 'd', 0),
+		packet(5, 1),
+	)
+	res, err := readResponse(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := res.header("Date"); len(got) != 1 || got[0] != "d" {
+		t.Errorf("date = %v", got)
+	}
+}
+
+func TestTitleHeaderName(t *testing.T) {
+	tests := map[string]string{
+		"content-type":     "Content-Type",
+		"www-authenticate": "Www-Authenticate",
+		"X-Request-ID":     "X-Request-ID",
+		"ETag":             "ETag",
+		"":                 "",
+	}
+	for in, want := range tests {
+		if got := titleHeaderName(in); got != want {
+			t.Errorf("titleHeaderName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

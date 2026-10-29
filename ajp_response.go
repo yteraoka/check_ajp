@@ -36,7 +36,7 @@ var SC_RES_HEADER = map[string]string{
 	SC_RES_CONTENT_TYPE:     "content-type",
 	SC_RES_CONTENT_LANGUAGE: "content-language",
 	SC_RES_CONTENT_LENGTH:   "content-length",
-	SC_RES_DATE:             "data",
+	SC_RES_DATE:             "date",
 	SC_RES_LAST_MODIFIED:    "last-modified",
 	SC_RES_LOCATION:         "location",
 	SC_RES_SET_COOKIE:       "set-cookie",
@@ -61,7 +61,7 @@ type AJP13Response struct {
 func (r *AJP13Response) header(name string) []string {
 	var result []string
 	for _, hdr := range r.Headers {
-		if strings.ToLower(hdr.Name) == strings.ToLower(name) {
+		if strings.EqualFold(hdr.Name, name) {
 			result = append(result, hdr.Value)
 		}
 	}
@@ -199,10 +199,22 @@ func readResponse(conn io.Reader) (AJP13Response, error) {
 
 func (r *AJP13Response) dumpHeader() {
 	fmt.Printf("StatusCode: %d\n", r.StatusCode)
-	fmt.Printf("StatusMessage: %s\n", r.StatusMessage)
+	fmt.Printf("StatusMessage: %s\n", sanitizeOutput(r.StatusMessage, false))
 	for _, hdr := range r.Headers {
-		fmt.Printf("%s: %s\n", strings.Title(hdr.Name), hdr.Value)
+		fmt.Printf("%s: %s\n", sanitizeOutput(titleHeaderName(hdr.Name), false), sanitizeOutput(hdr.Value, false))
 	}
+}
+
+// titleHeaderName upper-cases the first letter of each '-' separated word
+// (e.g. content-type -> Content-Type) and leaves the other letters as they are.
+func titleHeaderName(name string) string {
+	b := []byte(name)
+	for i := range b {
+		if (i == 0 || b[i-1] == '-') && 'a' <= b[i] && b[i] <= 'z' {
+			b[i] -= 'a' - 'A'
+		}
+	}
+	return string(b)
 }
 
 func readResponseHeaders(r *bytes.Reader, res *AJP13Response) error {

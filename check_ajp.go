@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 const (
@@ -63,6 +65,32 @@ func parseAttributeOption(s string) *Attribute {
 		os.Exit(NagiosUnknown)
 	}
 	return &Attribute{Code: SC_REQ_ATTR[strings.ToLower(parts[0])], Value: parts[1]}
+}
+
+// sanitizeOutput makes text received from the server safe to print as plugin
+// output. Control characters (which could inject terminal escape sequences),
+// invalid UTF-8 bytes and '|' (the Nagios performance data separator) are
+// escaped. Newlines and tabs are kept when multiline is true.
+func sanitizeOutput(s string, multiline bool) string {
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		switch {
+		case r == utf8.RuneError && size == 1:
+			fmt.Fprintf(&b, "\\x%02x", s[i])
+		case multiline && (r == '\n' || r == '\t'):
+			b.WriteRune(r)
+		case r == '|':
+			b.WriteString(`\x7c`)
+		case unicode.IsPrint(r):
+			b.WriteRune(r)
+		default:
+			q := strconv.QuoteRune(r)
+			b.WriteString(q[1 : len(q)-1])
+		}
+		i += size
+	}
+	return b.String()
 }
 
 func prettyPrintJSON(b []byte) ([]byte, error) {
@@ -180,7 +208,7 @@ func main() {
 
 	if len(opts.Verbose) > 1 {
 		fmt.Println("[RESPONSE BODY]")
-		fmt.Println(string(res.Body))
+		fmt.Println(sanitizeOutput(string(res.Body), true))
 		fmt.Println("")
 	}
 
@@ -235,7 +263,7 @@ func main() {
 		fmt.Println(resultMessage)
 	}
 	if len(additionalOut) > 0 {
-		fmt.Printf("\n%s\n", additionalOut)
+		fmt.Printf("\n%s\n", sanitizeOutput(string(additionalOut), true))
 	}
 	os.Exit(nagiosStatusCode)
 }
