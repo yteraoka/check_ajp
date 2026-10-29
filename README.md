@@ -33,6 +33,8 @@ Application Options:
                        discarded) (default: 1048576)
       --packet-size=   AJP packet size in bytes (packetSize of the Tomcat AJP
                        connector) (default: 8192)
+      --secret-file=   File to read the AJP secret from (default: AJP_SECRET
+                       environment variable)
 
 Help Options:
   -h, --help           Show this help message
@@ -64,6 +66,23 @@ Request attributes are given as `-a name=value` and can be repeated.
 ```
 
 Tomcat rejects a `req_attribute` with 403 unless its name matches `allowedRequestAttributesPattern` of the AJP connector.
+
+### secret
+
+Tomcat requires the `secret` of the AJP connector by default since the fix for CVE-2020-1938 (Ghostcat).
+Instead of `-a secret=...`, which other local users can see with `ps`, the secret can be given in one of the following ways.
+
+- `--secret-file=PATH`: read the secret from the file (trailing newlines are removed)
+- `AJP_SECRET` environment variable
+
+```
+install -m 600 /dev/null /etc/nagios/ajp_secret
+vi /etc/nagios/ajp_secret
+./check_ajp -I server --secret-file /etc/nagios/ajp_secret
+```
+
+`-a secret=...` takes precedence over `AJP_SECRET`, and `--secret-file` also takes precedence over `AJP_SECRET`.
+`-a secret=...` and `--secret-file` cannot be used together.
 
 ## Limitations
 
