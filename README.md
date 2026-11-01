@@ -93,3 +93,9 @@ Current version supported `GET` and `HEAD` method only.
 ```
 go build -o check_ajp
 ```
+
+## Release
+
+Releases are managed by [tagpr](https://github.com/Songmu/tagpr). Every push to `master` opens or updates a release pull request that bumps `Version` in `version.go` and updates `CHANGELOG.md`. Merging it tags the commit and creates the GitHub Release.
+
+The next version is a patch bump by default. Add the `tagpr:minor` or `tagpr:major` label to the release pull request for a bigger bump.
