@@ -166,8 +166,6 @@ func prettyPrintJSON(b []byte) ([]byte, error) {
 }
 
 func main() {
-	const Version = "0.1.0"
-
 	var opts Options
 	var resultMessage string
 	var additionalOut []byte

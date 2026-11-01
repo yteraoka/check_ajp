@@ -1,0 +1,9 @@
+[tagpr]
+	releaseBranch = master
+	# tagpr rewrites the Version constant here to match the new tag.
+	versionFile = version.go
+	vPrefix = true
+	changelog = true
+	# There is no release workflow that builds binaries, so tagpr itself
+	# creates the GitHub Release with the generated notes.
+	release = true
